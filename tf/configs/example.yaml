@@ -1,6 +1,4 @@
-%YAML 1.2
---- 
-name: "8x256-256"
+name: "BT5-QueenOdds-LoRA"
 gpu: 0
 dataset:
   num_chunks: 500_000_000
@@ -8,24 +6,25 @@ dataset:
   train_ratio: 0.95
   sort_type: name
   input_train: 
-    - '/mnt/t82data/training-run1-test80-202309*/'
+    - '/workspace/data/QueenOddsV2/input_train/'
   input_test:
-    - '/mnt/testdata/*/'
-  # input_validation:
-  # #  - '/mnt/data/validation-rescored/'
+    - '/workspace/data/QueenOddsV2/input_test/'
+  input_validation:
+    - '/workspace/data/QueenOddsV2/input_validation/'
   train_workers: 8
   test_workers: 4
-  fast_chunk_loading: false
+  fast_chunk_loading: true
   # pc_min: 0
   # pc_max: 6
 training:
     precision: half 
+    pb_source: "/workspace/nets/BT5-1024x15x32h-rpe-swa-3700000.pb.gz"
     swa: false
     swa_output: false  
     swa_max_n: 10
     swa_steps: 100
     max_grad_norm: 10.0
-    batch_size: 1024
+    batch_size: 256 # Reduced from 512 for OOM
     num_batch_splits: 1
     value_focus_min: 1.0
     value_focus_slope: 0.0
@@ -33,20 +32,21 @@ training:
     renorm: true
     renorm_max_r: 1.0
     renorm_max_d: 0.0
-    test_steps: 1_000
+    test_steps: 5_000
     disable_pb_checkpointing: false
     checkpoint_activations: false
 
     # validation_steps: 5000
-    num_test_positions: 131_072
+    validation_steps: 5000
+    num_test_positions: 10_240
     train_avg_report_steps: 1_000
-    total_steps: 3_000_000
+    total_steps: 100_000
     checkpoint_steps: 100_000
-    shuffle_size: 2_000_000
+    shuffle_size: 500_000 # Restored shuffle size
     warmup_steps: 1000
     mask_legal_moves: true
     lr_values: 
-        - 0.001
+        - 0.0002 # Increased slightly for BS 512
         - 0.000316
         - 0.0001
     lr_boundaries:
@@ -67,7 +67,6 @@ training:
         value_st_cat: 0.1
         moves_left: 1.0
         reg: 1.0
-        future: 0.1
     path: 'networks'
 
     optimizer: nadam # sgd/nadam/rmsprop/adabelief/adam
@@ -81,23 +80,21 @@ training:
 
 model:
 
-    # Dimension parameters
-    embedding_size: 256
-    policy_embedding_size: 256
-    value_embedding_size: 32
+    # Dimension parameters - Matches BT5-1024x15x32h
+    embedding_size: 1024
+    policy_embedding_size: 1024
+    value_embedding_size: 128
     moves_left_embedding_size: 32
-    encoder_layers: 8                   # number of intermediate attention layers in the policy head
-    encoder_heads: 8                    # number of attention heads in encoder layers, emb // (32 or 64) recommended
-                                         # with 64 memory is same as embedding, with 32 is double
-    encoder_d_model: 256                 # size of the Q, K, & V vectors in encoder layers -- divisible by encoder_heads
-    encoder_dff: 256                    # size of the expansion layer in encoder layer ffn
-    policy_d_model: 256                  # size of the query and key vectors in final attention layer
-    policy_d_aux: 256                     # size of the query and key vectors for auxiliary layers
-    dropout_rate: 0.0                    # the dropout rate used for weight regularization of attention during training
-                                        # makes memory 33 -> 39 GB on A100 as observed by Teck and Kovax
+    encoder_layers: 15                  # 15 blocks
+    encoder_heads: 32                   # 32 heads
+    encoder_d_model: 1024               # Embedding size
+    encoder_dff: 4096                   # Usually 4x d_model for standard Transformers
+    policy_d_model: 1024
+    policy_d_aux: 256
+    dropout_rate: 0.0
 
-    embedding_style: "old"
-    embedding_dense_sz: 32
+    embedding_style: "new"
+    embedding_dense_sz: 512 # Set to 512 as per inspect_pb_gz.py output
 
     value: 'wdl'
     moves_left: 'v1'
@@ -119,11 +116,11 @@ model:
     use_logit_gating: false
 
     # Ablations
-    omit_qkv_biases: true # these two increases training speed by ~10% on BT4 
-    encoder_rms_norm: true # without quality degradation
+    omit_qkv_biases: false # MATCHED BT5.YAML
+    encoder_rms_norm: false # MATCHED BT5.YAML
 
     # Output heads
-    policy_optimistic_st: false
+    policy_optimistic_st: true # MATCHED BT5.YAML
     policy_opponent: false
     policy_next: false
     value_st: true
@@ -139,3 +136,8 @@ model:
     quantize_weight_bits: 8
     quantize_channels: false
     rep_quant: false
+
+    # LoRA
+    lora_rank: 32
+    lora_alpha: 32 # Scaling factor = lora_alpha / lora_rank = 1.0. Increase to 64 for 2.0x scaling.
+

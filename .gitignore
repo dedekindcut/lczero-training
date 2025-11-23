@@ -111,3 +111,4 @@ tf/proto/
 *.v2
 leelalogs/
 networks/
+plots/

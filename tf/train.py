@@ -271,7 +271,7 @@ def main(cmd):
         validation_dataset = tf.data.Dataset.from_generator(
             validation_parser.sequential,
             output_types=output_types)
-        validation_dataset = validation_dataset.map(parse_function)
+        validation_dataset = validation_dataset.map(parse_function).take(160)
 
     if tfprocess.strategy is None:  # Mirrored strategy appends prefetch itself with a value depending on number of replicas
         train_dataset = train_dataset.prefetch(4)

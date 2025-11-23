@@ -176,7 +176,7 @@ class Quantize(tf.keras.layers.Layer):
         return quantize(x, self.s, 0.0, self.n_bits, n_features)
 
 class DenseLayer(tf.keras.layers.Layer):
-    def __init__(self, units, activation=None, n_bits=8, use_bias=True, kernel_initializer=None, quantized=False, input_quantize=None, use_rep_quant=False, **kwargs):
+    def __init__(self, units, activation=None, n_bits=8, use_bias=True, kernel_initializer=None, quantized=False, input_quantize=None, use_rep_quant=False, lora_rank=0, lora_alpha=1, **kwargs):
         super(DenseLayer, self).__init__(**kwargs)
         self.units = units
         self.activation = get_activation(activation)
@@ -186,15 +186,23 @@ class DenseLayer(tf.keras.layers.Layer):
         self.quantized=quantized
         self.input_quantize = input_quantize
         self.use_rep_quant = use_rep_quant
+        self.lora_rank = lora_rank
+        self.lora_alpha = lora_alpha
         if self.use_rep_quant:
             assert self.input_quantize is not None, "input_quantize must be provided if use_rep_quant is True"
 
 
     def build(self, input_shape):
         self.in_units = input_shape[-1]
-        self.kernel = self.add_weight(name='kernel', shape=[self.in_units, self.units], initializer=self.kernel_initializer, trainable=True)
+        trainable_main = self.lora_rank == 0
+        self.kernel = self.add_weight(name='kernel', shape=[self.in_units, self.units], initializer=self.kernel_initializer, trainable=trainable_main)
         if self.use_bias:
-            self.bias = self.add_weight(name='bias', shape=[self.units], initializer='zeros', trainable=True)
+            self.bias = self.add_weight(name='bias', shape=[self.units], initializer='zeros', trainable=trainable_main)
+        
+        if self.lora_rank > 0:
+            self.lora_A = self.add_weight(name='lora_A', shape=[self.in_units, self.lora_rank], initializer='glorot_normal', trainable=True)
+            self.lora_B = self.add_weight(name='lora_B', shape=[self.lora_rank, self.units], initializer='zeros', trainable=True)
+
         if self.quantized:
             self.quantizer = Quantize(n_bits=self.n_bits, name=self.name + '/quantizer', is_kernel=True)
 
@@ -213,6 +221,12 @@ class DenseLayer(tf.keras.layers.Layer):
                 kernel = kernel / (input_step + 1e-5)
 
         out = x @ kernel
+
+        if self.lora_rank > 0:
+            lora_out = (x @ self.lora_A) @ self.lora_B
+            scale = self.lora_alpha / self.lora_rank
+            out = out + lora_out * scale
+
         if self.use_bias:
             out = tf.add(out, self.bias)
         return self.activation(out)
@@ -400,8 +414,8 @@ class TFProcess:
         self.quantize_channels = self.cfg["model"].get("quantize_channels", False)
         self.rep_quant = self.cfg["model"].get("rep_quant", False)
 
-
-
+        self.lora_rank = self.cfg["model"].get("lora_rank", 0)
+        self.lora_alpha = self.cfg["model"].get("lora_alpha", 1)
 
         # Network structure
         self.embedding_size = self.cfg["model"]["embedding_size"]
@@ -670,7 +684,8 @@ class TFProcess:
             self.init_net()
 
     def init_net(self):
-        input_var = tf.keras.Input(shape=(112, 8, 8))
+        input_planes = 112 
+        input_var = tf.keras.Input(shape=(input_planes, 8, 8))
         outputs = self.construct_net(input_var)
         self.model = tf.keras.Model(inputs=input_var, outputs=outputs)
 
@@ -681,9 +696,9 @@ class TFProcess:
 
 
         print(f"params: {self.model.count_params()}")
-        smolgen_params = np.sum([K.count_params(w) for w in self.model.trainable_weights if "smol" in w.name])
-        emb_params = np.sum([K.count_params(w) for w in self.model.trainable_weights if "embedding/preprocess" in w.name])
-        rpe_params = np.sum([K.count_params(w) for w in self.model.trainable_weights if "rpe" in w.name])
+        smolgen_params = np.sum([np.prod(w.shape) for w in self.model.trainable_weights if "smol" in w.name])
+        emb_params = np.sum([np.prod(w.shape) for w in self.model.trainable_weights if "embedding/preprocess" in w.name])
+        rpe_params = np.sum([np.prod(w.shape) for w in self.model.trainable_weights if "rpe" in w.name])
 
 
         print(f"smolgen params: {smolgen_params}")
@@ -1166,12 +1181,16 @@ class TFProcess:
         # List all tensor names we need weights for.
         names = []
         for weight in self.model.weights:
+            if "lora" in weight.name:
+                continue
             names.append(weight.name)
 
         new_weights = self.net.get_weights_v2(names)
         for weight in self.model.weights:
             if "renorm" in weight.name:
                 # Renorm variables are not populated.
+                continue
+            if "lora" in weight.name:
                 continue
 
             try:
@@ -1493,7 +1512,7 @@ class TFProcess:
         # Run training for this batch
         grads = None
         for batch_id in range(batch_splits):
-            x, y, z, q, m, st_q, opp_idx, next_idx = next(self.train_iter)
+            x, y, z, q, m, st_q, opp_idx, next_idx, *args = next(self.train_iter)
             if self.strategy is not None:
                 metrics, new_grads = self.strategy_process_inner_loop(
                     x, y, z, q, m, st_q, opp_idx, next_idx)
@@ -1818,7 +1837,7 @@ class TFProcess:
         for metric in self.test_metrics:
             metric.reset()
         for _ in range(0, test_batches):
-            x, y, z, q, m, st_q, opp_idx, next_idx = next(self.test_iter)
+            x, y, z, q, m, st_q, opp_idx, next_idx, *args = next(self.test_iter)
             if self.strategy is not None:
                 metrics = self.strategy_calculate_test_summaries_inner_loop(
                     x, y, z, q, m, st_q, opp_idx, next_idx)
@@ -1838,9 +1857,9 @@ class TFProcess:
             for w in self.model.weights:
                 tf.summary.histogram(w.name, w, step=steps)
             params = self.model.count_params()
-            smolgen_params = np.sum([K.count_params(w) for w in self.model.trainable_weights if "smol" in w.name])
-            emb_params = np.sum([K.count_params(w) for w in self.model.trainable_weights if "embedding/preprocess" in w.name])
-            rpe_params = np.sum([K.count_params(w) for w in self.model.trainable_weights if "rpe" in w.name])
+            smolgen_params = np.sum([np.prod(w.shape) for w in self.model.trainable_weights if "smol" in w.name])
+            emb_params = np.sum([np.prod(w.shape) for w in self.model.trainable_weights if "embedding/preprocess" in w.name])
+            rpe_params = np.sum([np.prod(w.shape) for w in self.model.trainable_weights if "rpe" in w.name])
 
             try:
                 import tensorflow_models as tfm
@@ -1879,7 +1898,7 @@ class TFProcess:
         print("logging test validations")
         for metric in self.test_metrics:
             metric.reset()
-        for (x, y, z, q, m, st_q, opp_idx, next_idx) in self.validation_dataset:
+        for (x, y, z, q, m, st_q, opp_idx, next_idx, *args) in self.validation_dataset:
             if self.strategy is not None:
                 metrics = self.strategy_calculate_test_summaries_inner_loop(
                     x, y, z, q, m, st_q, opp_idx, next_idx)
@@ -1946,9 +1965,29 @@ class TFProcess:
             w.assign(old)
 
     def save_leelaz_weights(self, filename: str):
+        weight_dict = {w.name: w.numpy() for w in self.model.weights}
         numpy_weights = []
-        for weight in self.model.weights:
-            numpy_weights.append([weight.name, weight.numpy()])
+
+        for name, val in weight_dict.items():
+            if "lora_" in name:
+                continue
+
+            if name.endswith("/kernel:0") and self.lora_rank > 0:
+                base_name = name[:-len("kernel:0")]
+                lora_a_name = base_name + "lora_A:0"
+                lora_b_name = base_name + "lora_B:0"
+
+                if lora_a_name in weight_dict and lora_b_name in weight_dict:
+                    lora_A = weight_dict[lora_a_name]
+                    lora_B = weight_dict[lora_b_name]
+                    scale = self.lora_alpha / self.lora_rank
+                    # A: [in, rank], B: [rank, out]
+                    lora_correction = np.matmul(lora_A, lora_B) * scale
+                    val = val + lora_correction
+                    print(f"Merged LoRA weights for {name}")
+
+            numpy_weights.append([name, val])
+
         self.net.fill_net_v2(numpy_weights)
         self.net.save_proto(filename)
 
@@ -2031,11 +2070,11 @@ class TFProcess:
 
 
         q = DenseLayer(
-            depth, name=name+"/wq", kernel_initializer="glorot_normal", use_bias=use_bias, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant)(inputs)
+            depth, name=name+"/wq", kernel_initializer="glorot_normal", use_bias=use_bias, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant, lora_rank=self.lora_rank, lora_alpha=self.lora_alpha)(inputs)
         k = DenseLayer(
-            depth, name=name+"/wk", kernel_initializer="glorot_normal", use_bias=use_bias, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant)(inputs)
+            depth, name=name+"/wk", kernel_initializer="glorot_normal", use_bias=use_bias, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant, lora_rank=self.lora_rank, lora_alpha=self.lora_alpha)(inputs)
         v = DenseLayer(
-            depth, name=name+"/wv", kernel_initializer=initializer, use_bias=use_bias, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant)(inputs)
+            depth, name=name+"/wv", kernel_initializer=initializer, use_bias=use_bias, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant, lora_rank=self.lora_rank, lora_alpha=self.lora_alpha)(inputs)
 
 
         activations[name + "/wq"] = q
@@ -2070,7 +2109,7 @@ class TFProcess:
         # output = tf.keras.layers.Dense(
         #     emb_size, name=name + "/dense", kernel_initializer=initializer, use_bias=not self.omit_other_biases)(scaled_attention)
 
-        output = DenseLayer(emb_size, name=name + "/dense", kernel_initializer=initializer, use_bias=not self.omit_other_biases, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=out_quantize, use_rep_quant=False)(scaled_attention)
+        output = DenseLayer(emb_size, name=name + "/dense", kernel_initializer=initializer, use_bias=not self.omit_other_biases, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=out_quantize, use_rep_quant=False, lora_rank=self.lora_rank, lora_alpha=self.lora_alpha)(scaled_attention)
         activations[name + "/dense"] = output
         return output, attention_weights, activations
 
@@ -2094,14 +2133,14 @@ class TFProcess:
             inputs = input_quantize(inputs)
 
         dense1 = DenseLayer(dff, name=name + "/dense1", kernel_initializer=initializer, activation=activation,
-                    use_bias=not self.omit_other_biases, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant)(inputs)
+                    use_bias=not self.omit_other_biases, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant, lora_rank=self.lora_rank, lora_alpha=self.lora_alpha)(inputs)
         
         
         activations[name + "/dense1"] = dense1
 
         if glu:
             dense3 = DenseLayer(dff, name=name + "/dense3", kernel_initializer=initializer,
-                    use_bias=not self.omit_other_biases, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant)(inputs)
+                    use_bias=not self.omit_other_biases, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits, input_quantize=input_quantize, use_rep_quant=use_rep_quant, lora_rank=self.lora_rank, lora_alpha=self.lora_alpha)(inputs)
 
             dense1 = dense1 * dense3
 
@@ -2110,7 +2149,7 @@ class TFProcess:
             dense1 = out_quantize(dense1)
 
         out = DenseLayer(emb_size, name=name + "/dense2", kernel_initializer=initializer, use_bias=not self.omit_other_biases, quantized=self.quantize_weights, n_bits=self.quantize_weight_bits,
-                         input_quantize=out_quantize, use_rep_quant=False)(dense1)
+                         input_quantize=out_quantize, use_rep_quant=False, lora_rank=self.lora_rank, lora_alpha=self.lora_alpha)(dense1)
         activations[name + "/dense2"] = out
 
         return out, activations
@@ -2389,9 +2428,9 @@ class TFProcess:
         value_winner, value_winner_err, value_winner_cat = value_head(
             name="value/winner", wdl=self.wdl, use_err=False, use_cat=False)
         value_q, value_q_err, value_q_cat = value_head(
-            name="value/q", wdl=False, use_err=True) if self.cfg['model'].get('value_q', False) else (None, None, None)
+            name="value/q", wdl=True, use_err=True) if self.cfg['model'].get('value_q', False) else (None, None, None)
         value_st, value_st_err, value_st_cat = value_head(
-            name="value/st", wdl=False, use_err=True) if self.cfg['model'].get('value_st', False) else (None, None, None)
+            name="value/st", wdl=True, use_err=True) if self.cfg['model'].get('value_st', False) else (None, None, None)
 
         # Moves left head
         if self.moves_left:

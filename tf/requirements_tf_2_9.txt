@@ -2,6 +2,6 @@ tensorflow==2.9
 tensorflow-addons
 numpy
 protobuf
-pyyaml
+PyYAML>=6.0
 rich
 tf-models-official
