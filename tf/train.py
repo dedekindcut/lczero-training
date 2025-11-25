@@ -17,22 +17,21 @@
 #    along with Leela Zero.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
-import os
-import yaml
-import sys
 import glob
 import gzip
-import random
-import multiprocessing as mp
 import itertools
-from chunkparser import ChunkParser
-import random
+import multiprocessing as mp
+import os
 import pickle
+import random
+import sys
 
+import yaml
+from chunkparser import ChunkParser
 
 SKIP = 32
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 
 def fast_get_chunks(d):
@@ -41,34 +40,30 @@ def fast_get_chunks(d):
     fo_chunknames = []
     subdirs = os.listdir(d)
     chunkfiles_name = "chunknames.pkl"
-    if False and chunkfiles_name in subdirs: # TODO: remove False
-        print(f"Using cached {d + chunkfiles_name}" )
-        with open(d + chunkfiles_name, 'rb') as f:
-            chunknames = pickle.load(f)
-    else:
 
-        i = 0
-        for subdir in subdirs:
-            if subdir.endswith(".gz"):
-                fo_chunknames.append(d + subdir)
-            else:
-                prefix = d + subdir + "/"
-                if os.path.isdir(prefix):
-                    chunknames.append([prefix + s for s in os.listdir(prefix) if s.endswith(".gz")])
+    i = 0
+    for subdir in subdirs:
+        if subdir.endswith(".gz"):
+            fo_chunknames.append(d + subdir)
+        else:
+            prefix = d + subdir + "/"
+            if os.path.isdir(prefix):
+                chunknames.append(
+                    [prefix + s for s in os.listdir(prefix) if s.endswith(".gz")]
+                )
 
-            i += 1
-        chunknames.append(fo_chunknames)
-            
-        chunknames = list(itertools.chain.from_iterable(chunknames))
+        i += 1
+    chunknames.append(fo_chunknames)
 
-        with open(d + chunkfiles_name, 'wb') as f:
-            print("Shuffling the chunks", flush=True)
-            random.shuffle(chunknames)
-            print(f"Caching {d + chunkfiles_name}" )
-            pickle.dump(chunknames, f)
+    chunknames = list(itertools.chain.from_iterable(chunknames))
+
+    with open(d + chunkfiles_name, "wb") as f:
+        print("Shuffling the chunks", flush=True)
+        random.shuffle(chunknames)
+        print(f"Caching {d + chunkfiles_name}")
+        pickle.dump(chunknames, f)
 
     return chunknames
-
 
 
 def get_chunks(data_prefix):
@@ -76,7 +71,6 @@ def get_chunks(data_prefix):
 
 
 def get_all_chunks(path, fast=False):
-
     if isinstance(path, list):
         print("getting chunks for", path)
         chunks = []
@@ -97,16 +91,17 @@ def get_latest_chunks(path, num_chunks, allow_less, sort_key_fn, fast=False):
     chunks = get_all_chunks(path, fast=fast)
     if len(chunks) < num_chunks:
         if allow_less:
-            print("sorting {} chunks...".format(len(chunks)),
-                  end="",
-                  flush=True)
+            print("sorting {} chunks...".format(len(chunks)), end="", flush=True)
             if True:
                 print("sorting disabled")
             else:
                 chunks.sort(key=sort_key_fn, reverse=True)
             print("[done]")
-            print("{} - {}".format(os.path.basename(chunks[-1]),
-                                   os.path.basename(chunks[0])))
+            print(
+                "{} - {}".format(
+                    os.path.basename(chunks[-1]), os.path.basename(chunks[0])
+                )
+            )
             print("shuffling chunks...", end="", flush=True)
             if True:
                 print("shuffling disabled", flush=True)
@@ -122,8 +117,7 @@ def get_latest_chunks(path, num_chunks, allow_less, sort_key_fn, fast=False):
     chunks.sort(key=sort_key_fn, reverse=True)
     print("[done]")
     chunks = chunks[:num_chunks]
-    print("{} - {}".format(os.path.basename(chunks[-1]),
-                           os.path.basename(chunks[0])))
+    print("{} - {}".format(os.path.basename(chunks[-1]), os.path.basename(chunks[0])))
     random.shuffle(chunks)
     return chunks
 
@@ -133,13 +127,13 @@ def identity_function(name):
 
 
 def game_number_for_name(name):
-    num_str = os.path.basename(name).upper().strip(
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ_-.")
+    num_str = os.path.basename(name).upper().strip("ABCDEFGHIJKLMNOPQRSTUVWXYZ_-.")
     return int(num_str)
 
 
 def get_input_mode(cfg):
     import proto.net_pb2 as pb
+
     input_mode = cfg["model"].get("input_type", "classic")
 
     if input_mode == "classic":
@@ -180,13 +174,28 @@ def main(cmd):
     else:
         raise ValueError("Unknown dataset sort_type: {}".format(sort_type))
     if "input_test" in cfg["dataset"]:
-        train_chunks = get_latest_chunks(cfg["dataset"]["input_train"],
-                                         num_train, allow_less, sort_key_fn, fast=fast_chunk_loading)
-        test_chunks = get_latest_chunks(cfg["dataset"]["input_test"], num_test,
-                                        allow_less, sort_key_fn, fast=fast_chunk_loading)
+        train_chunks = get_latest_chunks(
+            cfg["dataset"]["input_train"],
+            num_train,
+            allow_less,
+            sort_key_fn,
+            fast=fast_chunk_loading,
+        )
+        test_chunks = get_latest_chunks(
+            cfg["dataset"]["input_test"],
+            num_test,
+            allow_less,
+            sort_key_fn,
+            fast=fast_chunk_loading,
+        )
     else:
-        chunks = get_latest_chunks(cfg["dataset"]["input"], num_chunks,
-                                   allow_less, sort_key_fn, fast=fast_chunk_loading)
+        chunks = get_latest_chunks(
+            cfg["dataset"]["input"],
+            num_chunks,
+            allow_less,
+            sort_key_fn,
+            fast=fast_chunk_loading,
+        )
         if allow_less:
             num_train = int(len(chunks) * train_ratio)
             num_test = len(chunks) - num_train
@@ -213,39 +222,46 @@ def main(cmd):
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
 
-    train_parser = ChunkParser(train_chunks,
-                               get_input_mode(cfg),
-                               shuffle_size=shuffle_size,
-                               sample=SKIP,
-                               batch_size=split_batch_size,
-                               diff_focus_min=diff_focus_min,
-                               diff_focus_slope=diff_focus_slope,
-                               diff_focus_q_weight=diff_focus_q_weight,
-                               diff_focus_pol_scale=diff_focus_pol_scale,
-                               pc_min=pc_min,
-                               pc_max=pc_max,
-                               workers=train_workers)
+    train_parser = ChunkParser(
+        train_chunks,
+        get_input_mode(cfg),
+        shuffle_size=shuffle_size,
+        sample=SKIP,
+        batch_size=split_batch_size,
+        diff_focus_min=diff_focus_min,
+        diff_focus_slope=diff_focus_slope,
+        diff_focus_q_weight=diff_focus_q_weight,
+        diff_focus_pol_scale=diff_focus_pol_scale,
+        pc_min=pc_min,
+        pc_max=pc_max,
+        workers=train_workers,
+    )
     test_shuffle_size = int(shuffle_size * (1.0 - train_ratio))
     # no diff focus for test_parser
-    test_parser = ChunkParser(test_chunks,
-                              get_input_mode(cfg),
-                              shuffle_size=test_shuffle_size,
-                              sample=SKIP,
-                              batch_size=split_batch_size,
-                            #   pc_min=pc_min,
-                            #   pc_max=pc_max,
-                              workers=test_workers)
-    
-    
+    test_parser = ChunkParser(
+        test_chunks,
+        get_input_mode(cfg),
+        shuffle_size=test_shuffle_size,
+        sample=SKIP,
+        batch_size=split_batch_size,
+        #   pc_min=pc_min,
+        #   pc_max=pc_max,
+        workers=test_workers,
+    )
+
     if "input_validation" in cfg["dataset"]:
-        valid_chunks = get_all_chunks(cfg["dataset"]["input_validation"], fast=fast_chunk_loading)
-        validation_parser = ChunkParser(valid_chunks,
-                                        get_input_mode(cfg),
-                                        sample=1,
-                                        batch_size=split_batch_size,
-                                        # pc_min=pc_min,
-                                        # pc_max=pc_max,
-                                        workers=0)
+        valid_chunks = get_all_chunks(
+            cfg["dataset"]["input_validation"], fast=fast_chunk_loading
+        )
+        validation_parser = ChunkParser(
+            valid_chunks,
+            get_input_mode(cfg),
+            sample=1,
+            batch_size=split_batch_size,
+            # pc_min=pc_min,
+            # pc_max=pc_max,
+            workers=0,
+        )
 
     import tensorflow as tf
     from chunkparsefunc import parse_function
@@ -258,29 +274,33 @@ def main(cmd):
 
     print("Initializing datasets")
     train_dataset = tf.data.Dataset.from_generator(
-        train_parser.parse,
-        output_types=output_types)
+        train_parser.parse, output_types=output_types
+    )
     train_dataset = train_dataset.map(parse_function)
     test_dataset = tf.data.Dataset.from_generator(
-        test_parser.parse,
-        output_types=output_types)
+        test_parser.parse, output_types=output_types
+    )
     test_dataset = test_dataset.map(parse_function)
 
     validation_dataset = None
     if "input_validation" in cfg["dataset"]:
         validation_dataset = tf.data.Dataset.from_generator(
-            validation_parser.sequential,
-            output_types=output_types)
+            validation_parser.sequential, output_types=output_types
+        )
         validation_dataset = validation_dataset.map(parse_function).take(160)
 
-    if tfprocess.strategy is None:  # Mirrored strategy appends prefetch itself with a value depending on number of replicas
+    if (
+        tfprocess.strategy is None
+    ):  # Mirrored strategy appends prefetch itself with a value depending on number of replicas
         train_dataset = train_dataset.prefetch(4)
         test_dataset = test_dataset.prefetch(4)
         if validation_dataset is not None:
             validation_dataset = validation_dataset.prefetch(4)
     else:
         options = tf.data.Options()
-        options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+        options.experimental_distribute.auto_shard_policy = (
+            tf.data.experimental.AutoShardPolicy.OFF
+        )
         train_dataset = train_dataset.with_options(options)
         test_dataset = test_dataset.with_options(options)
         if validation_dataset is not None:
@@ -288,8 +308,7 @@ def main(cmd):
     print("Done")
 
     print("Initializing TFProcess")
-    tfprocess.init(train_dataset, test_dataset,
-                   validation_dataset)  # None, None, None
+    tfprocess.init(train_dataset, test_dataset, validation_dataset)  # None, None, None
 
     tfprocess.restore()
     print("Done")
@@ -299,14 +318,11 @@ def main(cmd):
     # Assumes average of 10 samples per test game.
     # For simplicity, testing can use the split batch size instead of total batch size.
     # This does not affect results, because test results are simple averages that are independent of batch size.
-    num_evals = cfg["training"].get("num_test_positions",
-                                    len(test_chunks) * 10)
+    num_evals = cfg["training"].get("num_test_positions", len(test_chunks) * 10)
     num_evals = max(1, num_evals // split_batch_size)
     print("Using {} evaluation batches".format(num_evals))
     tfprocess.total_batch_size = total_batch_size
-    tfprocess.process_loop(total_batch_size,
-                           num_evals,
-                           batch_splits=batch_splits)
+    tfprocess.process_loop(total_batch_size, num_evals, batch_splits=batch_splits)
 
     if cmd.output is not None:
         if cfg["training"].get("swa_output", False):
@@ -320,13 +336,14 @@ def main(cmd):
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(
-        description="Tensorflow pipeline for training Leela Chess.")
-    argparser.add_argument("--cfg",
-                           type=argparse.FileType("r"),
-                           help="yaml configuration with training parameters")
-    argparser.add_argument("--output",
-                           type=str,
-                           help="file to store weights in")
+        description="Tensorflow pipeline for training Leela Chess."
+    )
+    argparser.add_argument(
+        "--cfg",
+        type=argparse.FileType("r"),
+        help="yaml configuration with training parameters",
+    )
+    argparser.add_argument("--output", type=str, help="file to store weights in")
 
     # mp.set_start_method("spawn")
     main(argparser.parse_args())

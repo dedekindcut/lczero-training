@@ -80,6 +80,7 @@ CLASSICAL_INPUT = struct.pack("i", 1)
 V4_VERSION = struct.pack("i", 4)
 V3_VERSION = struct.pack("i", 3)
 V7B_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHfffHHffffffff" + "7432s" * n_future_probs + str(12 * 8 * n_future_boards) + "s"
+V6B_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHff" + "7432s" * n_future_probs + str(12 * 8 * n_future_boards) + "s"
 V7_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHfffHHffffffff"
 V6_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffffffffffffIHHff"
 V5_STRUCT_STRING = "4si7432s832sBBBBBBBbfffffff"
@@ -87,6 +88,7 @@ V4_STRUCT_STRING = "4s7432s832sBBBBBBBbffff"
 V3_STRUCT_STRING = "4s7432s832sBBBBBBBb"
 
 v7b_struct = struct.Struct(V7B_STRUCT_STRING)
+v6b_struct = struct.Struct(V6B_STRUCT_STRING)
 v7_struct = struct.Struct(V7_STRUCT_STRING)
 v6_struct = struct.Struct(V6_STRUCT_STRING)
 v5_struct = struct.Struct(V5_STRUCT_STRING)
@@ -248,14 +250,25 @@ def convert_v7b_to_tuple(content):
     float extra[8]                               8364
     ...                                          8396
     """
-    # unpack the V6 content from raw byte array, arbitrarily chose 4 2-byte values
-    # for the 8 "reserved" bytes
-    (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
+    if len(content) == v6b_struct.size:
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
         stm, rule50_count, invariance_info, dep_result, root_q, best_q,
         root_d, best_d, root_m, best_m, plies_left, result_q, result_d,
         played_q, played_d, played_m, orig_q, orig_d, orig_m, visits,
-        played_idx, best_idx, pol_kld, st_q, st_d, opp_played_idx, next_played_idx,
-        f1, f2, f3, f4, f5, f6, f7, f8, opp_probs, next_probs, fut) = v7b_struct.unpack(content)
+        played_idx, best_idx, pol_kld, st_q, opp_probs, next_probs, fut) = v6b_struct.unpack(content)
+        # Polyfill V7 fields
+        st_d = 0.0
+        opp_played_idx = 0
+        next_played_idx = 0
+        f1=f2=f3=f4=f5=f6=f7=f8 = 0.0
+    else:
+        (ver, input_format, probs, planes, us_ooo, us_oo, them_ooo, them_oo,
+            stm, rule50_count, invariance_info, dep_result, root_q, best_q,
+            root_d, best_d, root_m, best_m, plies_left, result_q, result_d,
+            played_q, played_d, played_m, orig_q, orig_d, orig_m, visits,
+            played_idx, best_idx, pol_kld, st_q, st_d, opp_played_idx, next_played_idx,
+            f1, f2, f3, f4, f5, f6, f7, f8, opp_probs, next_probs, fut) = v7b_struct.unpack(content)
+
     """
     v5 struct format was (8308 bytes total)
         int32 version (4 bytes)
@@ -582,7 +595,10 @@ class ChunkParserInner:
         Read v7 records from child workers, shuffle, and yield
         records.
         """
-        sbuff = sb.ShuffleBuffer(v7b_struct.size, self.shuffle_size)
+        # Calculate full size for V6-based records (base struct + future probs + future boards)
+        # v6_struct.size (8356) + 2 * 7432 + 16 * 96 = 24756
+        full_v6_size = v6_struct.size + 2 * 7432 + 16 * 96
+        sbuff = sb.ShuffleBuffer(full_v6_size, self.shuffle_size)
         while len(self.readers):
             for r in self.readers:
                 try:

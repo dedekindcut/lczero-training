@@ -19,12 +19,41 @@ START_FROM = args.start
 
 tfp = tfprocess.TFProcess(cfg)
 tfp.init_net()
+
+# Explicitly restore the requested checkpoint
+root_dir = os.path.join(cfg["training"]["path"], cfg["name"])
+checkpoint_path = os.path.join(root_dir, cfg["name"] + "-" + str(START_FROM))
+
+if os.path.exists(checkpoint_path + ".index"):
+    print(f"Restoring weights from {checkpoint_path}...")
+    # tfprocess stores the checkpoint object as self.ckpt, not self.checkpoint (based on my reading of TFProcess.__init__ in source, 
+    # wait, the restore() method used self.checkpoint. Let's verify which one it is.
+    # In TFProcess.__init__ (standard Lc0): self.ckpt = tf.train.Checkpoint(...) 
+    # In TFProcess.restore(): self.checkpoint.restore(...)
+    # It seems there is inconsistency or aliasing. Let's assume self.ckpt based on typical TF usage, 
+    # but check if self.checkpoint exists.
+    
+    # Actually, let's look at the `restore` method I read: "self.checkpoint.restore"
+    # So TFProcess likely has `self.checkpoint`.
+    
+    if hasattr(tfp, 'checkpoint'):
+        tfp.checkpoint.restore(checkpoint_path).expect_partial()
+    elif hasattr(tfp, 'ckpt'):
+        tfp.ckpt.restore(checkpoint_path).expect_partial()
+    else:
+        print("Error: Could not find checkpoint object in TFProcess (tried .checkpoint and .ckpt)")
+        exit(1)
+    print("Restoration complete.")
+else:
+    print(f"Warning: Checkpoint {checkpoint_path} not found! Saving BASE model + random init.")
+
 tfp.global_step.assign(START_FROM)
 
-root_dir = os.path.join(cfg["training"]["path"], cfg["name"])
 if not os.path.exists(root_dir):
     os.makedirs(root_dir)
-tfp.manager.save(checkpoint_number=START_FROM)
+# We don't need to save the checkpoint again, just export the weights.
+# tfp.manager.save(checkpoint_number=START_FROM) 
+
 print("Wrote model to {}".format(tfp.manager.latest_checkpoint))
 path = os.path.join(tfp.root_dir, tfp.cfg["name"])
 leela_path = path + "-" + str(START_FROM)

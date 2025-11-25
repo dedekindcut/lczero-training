@@ -37,14 +37,14 @@ Clone your repository or sync your local project to the instance.
 
 **Option A: Git Clone**
 ```bash
-git clone <your-repo-url> dm-lczero-training
-cd dm-lczero-training
+git clone <your-repo-url> lczero-training
+cd lczero-training
 ```
 
 **Option B: RSYNC from Local Machine**
 From your local terminal:
 ```bash
-rsync -avz -e "ssh -p <PORT>" ./ root@<IP>:~/dm-lczero-training/
+rsync -avz -e "ssh -p <PORT>" ./ root@<IP>:~/lczero-training/
 ```
 
 ## 4. Python Environment & Dependencies
@@ -52,7 +52,7 @@ rsync -avz -e "ssh -p <PORT>" ./ root@<IP>:~/dm-lczero-training/
 Initialize the project and install dependencies using `uv`. This handles the complex TensorFlow/CUDA version matching automatically.
 
 ```bash
-cd ~/dm-lczero-training
+cd ~/lczero-training
 uv init
 ```
 
