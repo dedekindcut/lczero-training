@@ -90,6 +90,15 @@ Use the following command to start training. It sets necessary environment varia
 TF_USE_LEGACY_KERAS=1 PYTHONPATH=. uv run tf/train.py --cfg tf/configs/example.yaml
 ```
 
+## 8. Converting the Model
+
+Use the following command to convert the checkpoint to `.pb.gz`.
+
+```bash
+cd /workspace/lczero-training && TF_USE_LEGACY_KERAS=1 PYTHONPATH=. uv run python3 tf/make_model.py --cfg tf/configs/queenodds.yaml --start 100000
+```
+
+
 **Monitoring:**
 *   **Console:** Watch for `P Acc` (Policy Accuracy) and speed (`pos/s`).
 *   **TensorBoard:**
