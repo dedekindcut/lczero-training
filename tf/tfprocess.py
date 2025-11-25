@@ -24,13 +24,12 @@ import os
 import time
 from functools import reduce
 
+import attention_policy_map as apm
 import numpy as np
 import proto.net_pb2 as pb
 import tensorflow as tf
 from keras import backend as K
-
-from . import attention_policy_map as apm  # Corrected relative import
-from .net import Net  # Corrected relative import
+from net import Net
 
 # @tf.custom_gradient
 # def gradient_checkpointed_matmul(x, kernel, bias):
@@ -277,7 +276,9 @@ class DenseLayer(tf.keras.layers.Layer):
         if self.lora_rank > 0:
             # Cast to float32 for stable gradient flow through zero-init lora_B
             x_f32 = tf.cast(x, tf.float32)
-            lora_out = (x_f32 @ self.lora_A) @ self.lora_B
+            lora_A_f32 = tf.cast(self.lora_A, tf.float32)
+            lora_B_f32 = tf.cast(self.lora_B, tf.float32)
+            lora_out = (x_f32 @ lora_A_f32) @ lora_B_f32
             scale = self.lora_alpha / self.lora_rank
             lora_out = tf.cast(lora_out * scale, x.dtype)
             out = out + lora_out
