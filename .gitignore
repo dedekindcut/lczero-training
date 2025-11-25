@@ -114,5 +114,6 @@ tf/proto/
 # runs
 *.v2
 leelalogs/
+data/
 networks/
 plots/

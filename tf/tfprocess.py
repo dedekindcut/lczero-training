@@ -275,9 +275,12 @@ class DenseLayer(tf.keras.layers.Layer):
         out = x @ kernel
 
         if self.lora_rank > 0:
-            lora_out = (x @ self.lora_A) @ self.lora_B
+            # Cast to float32 for stable gradient flow through zero-init lora_B
+            x_f32 = tf.cast(x, tf.float32)
+            lora_out = (x_f32 @ self.lora_A) @ self.lora_B
             scale = self.lora_alpha / self.lora_rank
-            out = out + lora_out * scale
+            lora_out = tf.cast(lora_out * scale, x.dtype)
+            out = out + lora_out
 
         if self.use_bias:
             out = tf.add(out, self.bias)
