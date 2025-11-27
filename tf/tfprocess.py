@@ -2647,18 +2647,23 @@ class TFProcess:
             pos_info = flow[..., :12]
             pos_info_flat = tf.reshape(pos_info, [-1, 64 * 12])
 
-            pos_info_processed = tf.keras.layers.Dense(
-                64 * self.embedding_dense_sz, name=name + "embedding/preprocess"
+            pos_info_processed = DenseLayer(
+                64 * self.embedding_dense_sz,
+                name=name + "embedding/preprocess",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(pos_info_flat)
             pos_info = tf.reshape(pos_info_processed, [-1, 64, self.embedding_dense_sz])
             flow = tf.keras.layers.Concatenate()([flow, pos_info])
 
             # square embedding
-            flow = tf.keras.layers.Dense(
+            flow = DenseLayer(
                 self.embedding_size,
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "embedding",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(flow)
             flow = self.encoder_norm(name=name + "embedding/ln")(flow)
             flow = ma_gating(flow, name=name + "embedding")
@@ -2701,11 +2706,13 @@ class TFProcess:
             flow = tf.concat([flow, pos_enc], axis=-1)  # [batch, 64, 176]
 
             # square embedding
-            flow = tf.keras.layers.Dense(
+            flow = DenseLayer(
                 self.embedding_size,
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name="embedding",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(flow)
 
             flow = ma_gating(flow, name="embedding")
@@ -2733,11 +2740,13 @@ class TFProcess:
 
         # Skip policy embedding projection if sizes match (T1 model compatibility)
         if self.pol_embedding_size != self.embedding_size:
-            policy_tokens = tf.keras.layers.Dense(
+            policy_tokens = DenseLayer(
                 self.pol_embedding_size,
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "policy/embedding",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(flow_)
         else:
             policy_tokens = flow_
@@ -2750,11 +2759,19 @@ class TFProcess:
             tokens = tf.reverse(policy_tokens, axis=[1]) if opponent else policy_tokens
 
             # create queries and keys for policy self-attention
-            queries = tf.keras.layers.Dense(
-                depth, kernel_initializer="glorot_normal", name=name + "/attention/wq"
+            queries = DenseLayer(
+                depth,
+                kernel_initializer="glorot_normal",
+                name=name + "/attention/wq",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(tokens)
-            keys = tf.keras.layers.Dense(
-                depth, kernel_initializer="glorot_normal", name=name + "/attention/wk"
+            keys = DenseLayer(
+                depth,
+                kernel_initializer="glorot_normal",
+                name=name + "/attention/wk",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(tokens)
 
             # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
@@ -2770,11 +2787,13 @@ class TFProcess:
             dk = tf.math.sqrt(tf.cast(tf.shape(keys)[-1], self.model_dtype))
             promotion_keys = keys[:, -8:, :]
             # queen, rook, bishop, knight order
-            promotion_offsets = tf.keras.layers.Dense(
+            promotion_offsets = DenseLayer(
                 4,
                 kernel_initializer="glorot_normal",
                 name=name + "/attention/ppo",
                 use_bias=False,
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(promotion_keys)
             promotion_offsets = (
                 tf.transpose(promotion_offsets, perm=[0, 2, 1]) * dk
@@ -2829,7 +2848,12 @@ class TFProcess:
 
         def future_head(name):
             # hack so checkpointing works
-            return tf.keras.layers.Dense(2, name=name + "/attention/wq")(policy_tokens)
+            return DenseLayer(
+                2,
+                name=name + "/attention/wq",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
+            )(policy_tokens)
 
         aux_depth = self.cfg["model"].get("policy_d_aux", self.policy_d_model)
 
@@ -2858,50 +2882,64 @@ class TFProcess:
         )
 
         def value_head(name, wdl=True, use_err=True, use_cat=True):
-            embedded_val = tf.keras.layers.Dense(
+            embedded_val = DenseLayer(
                 self.val_embedding_size,
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "/embedding",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(flow)
 
             h_val_flat = tf.keras.layers.Flatten()(embedded_val)
-            h_fc2 = tf.keras.layers.Dense(
+            h_fc2 = DenseLayer(
                 128,
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "/dense1",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(h_val_flat)
 
             # WDL head
             if wdl:
-                value = tf.keras.layers.Dense(
-                    3, kernel_initializer="glorot_normal", name=name + "/dense2"
+                value = DenseLayer(
+                    3,
+                    kernel_initializer="glorot_normal",
+                    name=name + "/dense2",
+                    lora_rank=self.lora_rank,
+                    lora_alpha=self.lora_alpha,
                 )(h_fc2)
             else:
-                value = tf.keras.layers.Dense(
+                value = DenseLayer(
                     1,
                     kernel_initializer="glorot_normal",
                     activation="tanh",
                     name=name + "/dense2",
+                    lora_rank=self.lora_rank,
+                    lora_alpha=self.lora_alpha,
                 )(h_fc2)
 
             if use_err:
                 # Shouldn't be more than 1
-                value_err = tf.keras.layers.Dense(
+                value_err = DenseLayer(
                     1,
                     kernel_initializer="glorot_normal",
                     name=name + "/dense_error",
                     activation="sigmoid",
+                    lora_rank=self.lora_rank,
+                    lora_alpha=self.lora_alpha,
                 )(h_fc2)
             else:
                 value_err = None
 
             if use_cat and self.categorical_value_buckets:
-                value_cat = tf.keras.layers.Dense(
+                value_cat = DenseLayer(
                     self.categorical_value_buckets,
                     kernel_initializer="glorot_normal",
                     name=name + "/dense_cat",
+                    lora_rank=self.lora_rank,
+                    lora_alpha=self.lora_alpha,
                 )(h_fc2)
             else:
                 value_cat = None
@@ -2924,27 +2962,33 @@ class TFProcess:
 
         # Moves left head
         if self.moves_left:
-            embedded_mov = tf.keras.layers.Dense(
+            embedded_mov = DenseLayer(
                 self.mov_embedding_size,
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "moves_left/embedding",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(flow)
 
             h_mov_flat = tf.keras.layers.Flatten()(embedded_mov)
 
-            h_fc4 = tf.keras.layers.Dense(
+            h_fc4 = DenseLayer(
                 128,
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "moves_left/dense1",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(h_mov_flat)
 
-            moves_left = tf.keras.layers.Dense(
+            moves_left = DenseLayer(
                 1,
                 kernel_initializer="glorot_normal",
                 activation="relu",
                 name=name + "moves_left/dense2",
+                lora_rank=self.lora_rank,
+                lora_alpha=self.lora_alpha,
             )(h_fc4)
         else:
             moves_left = None
