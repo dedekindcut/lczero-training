@@ -26,10 +26,12 @@ from functools import reduce
 
 import attention_policy_map as apm
 import numpy as np
-import proto.net_pb2 as pb
 import tensorflow as tf
 from keras import backend as K
 from net import Net
+from pos_encoding import kPosEncoding
+
+import proto.net_pb2 as pb
 
 # @tf.custom_gradient
 # def gradient_checkpointed_matmul(x, kernel, bias):
@@ -740,6 +742,8 @@ class TFProcess:
             )
         else:
             self.validation_dataset = validation_dataset
+        if self.validation_dataset is not None:
+            self.validation_iter = iter(self.validation_dataset)
         if self.strategy is not None:
             this = self
             with self.strategy.scope():
@@ -1441,6 +1445,7 @@ class TFProcess:
                     print(
                         "Memory resources exhausted. Try decreasing batch size or model dimension"
                     )
+                    print(f"Error details: {e}")
                     print("Saving model...")
                     steps = self.global_step.read_value()
                     evaled_steps = steps.numpy()
@@ -1449,6 +1454,22 @@ class TFProcess:
                         "Model saved in file: {}".format(self.manager.latest_checkpoint)
                     )
                     exit()
+                except Exception as e:
+                    print(f"\n{'=' * 80}")
+                    print(f"UNEXPECTED ERROR: {type(e).__name__}")
+                    print(f"Error message: {e}")
+                    print(f"{'=' * 80}\n")
+                    import traceback
+
+                    traceback.print_exc()
+                    steps = self.global_step.read_value()
+                    evaled_steps = steps.numpy()
+                    print(f"Saving checkpoint at step {evaled_steps}...")
+                    self.manager.save(checkpoint_number=evaled_steps)
+                    print(
+                        "Model saved in file: {}".format(self.manager.latest_checkpoint)
+                    )
+                    raise
 
         else:
             print("Warning, rich module not found, disabling progress bar")
@@ -1533,11 +1554,18 @@ class TFProcess:
                 else (tf.constant(0.0), tf.constant(0.0), tf.constant(0.0))
             )
             if self.wdl:
-                mse_loss = self.mse_loss_fn(q, value_q)
+                # Use value_q if available, otherwise fall back to value_winner
+                if value_q is not None:
+                    mse_loss = self.mse_loss_fn(q, value_q)
+                else:
+                    mse_loss = self.mse_loss_fn(q, value_winner)
                 value_accuracy = self.accuracy_fn(z, value_winner)
 
             else:
-                mse_loss = self.mse_loss_fn(q, value_q)
+                if value_q is not None:
+                    mse_loss = self.mse_loss_fn(q, value_q)
+                else:
+                    mse_loss = self.mse_loss_fn(q, value_winner)
                 value_accuracy = tf.constant(0.0)
 
             reg_term = sum(self.model.losses)
@@ -1956,10 +1984,17 @@ class TFProcess:
         )
 
         if self.wdl:
-            mse_loss = self.mse_loss_fn(q, value_q)
+            # Use value_q if available, otherwise fall back to value_winner
+            if value_q is not None:
+                mse_loss = self.mse_loss_fn(q, value_q)
+            else:
+                mse_loss = self.mse_loss_fn(q, value_winner)
             value_accuracy = self.accuracy_fn(z, value_winner)
         else:
-            mse_loss = self.mse_loss_fn(q, value_q)
+            if value_q is not None:
+                mse_loss = self.mse_loss_fn(q, value_q)
+            else:
+                mse_loss = self.mse_loss_fn(q, value_winner)
             value_accuracy = tf.constant(0.0)
 
         # Moves left loss
@@ -2015,20 +2050,35 @@ class TFProcess:
         return metrics
 
     def calculate_test_summaries(self, test_batches: int, steps: int):
-        for metric in self.test_metrics:
-            metric.reset()
-        for _ in range(0, test_batches):
-            x, y, z, q, m, st_q, opp_idx, next_idx, *args = next(self.test_iter)
-            if self.strategy is not None:
-                metrics = self.strategy_calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, st_q, opp_idx, next_idx
-                )
-            else:
-                metrics = self.calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, st_q, opp_idx, next_idx
-                )
-            for acc, val in zip(self.test_metrics, metrics):
-                acc.accumulate(val)
+        try:
+            for metric in self.test_metrics:
+                metric.reset()
+            for batch_idx in range(0, test_batches):
+                try:
+                    x, y, z, q, m, st_q, opp_idx, next_idx, *args = next(self.test_iter)
+                    if self.strategy is not None:
+                        metrics = self.strategy_calculate_test_summaries_inner_loop(
+                            x, y, z, q, m, st_q, opp_idx, next_idx
+                        )
+                    else:
+                        metrics = self.calculate_test_summaries_inner_loop(
+                            x, y, z, q, m, st_q, opp_idx, next_idx
+                        )
+                    for acc, val in zip(self.test_metrics, metrics):
+                        acc.accumulate(val)
+                except Exception as e:
+                    print(
+                        f"ERROR in test batch {batch_idx}/{test_batches} at step {steps}: {type(e).__name__}: {e}"
+                    )
+                    raise
+        except Exception as e:
+            print(
+                f"ERROR in calculate_test_summaries at step {steps}: {type(e).__name__}: {e}"
+            )
+            import traceback
+
+            traceback.print_exc()
+            raise
         self.net.pb.training_params.learning_rate = self.lr
         self.net.pb.training_params.mse_loss = self.test_metrics[3].get()
         self.net.pb.training_params.policy_loss = self.test_metrics[0].get()
@@ -2099,32 +2149,59 @@ class TFProcess:
             w.assign(old)
 
     def calculate_test_validations(self, steps: int):
-        print("logging test validations")
-        for metric in self.test_metrics:
-            metric.reset()
-        for x, y, z, q, m, st_q, opp_idx, next_idx, *args in self.validation_dataset:
-            if self.strategy is not None:
-                metrics = self.strategy_calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, st_q, opp_idx, next_idx
-                )
-            else:
-                metrics = self.calculate_test_summaries_inner_loop(
-                    x, y, z, q, m, st_q, opp_idx, next_idx
-                )
-            for acc, val in zip(self.test_metrics, metrics):
-                acc.accumulate(val)
-        with self.validation_writer.as_default():
+        try:
+            print("logging test validations")
             for metric in self.test_metrics:
-                tf.summary.scalar(metric.long_name, metric.get(), step=steps)
-        self.validation_writer.flush()
+                metric.reset()
+            batch_idx = 0
+            validation_batches = 0
+            for batch_idx in range(10000):  # Safety limit to avoid infinite loop
+                try:
+                    x, y, z, q, m, st_q, opp_idx, next_idx, *args = next(
+                        self.validation_iter
+                    )
+                    if self.strategy is not None:
+                        metrics = self.strategy_calculate_test_summaries_inner_loop(
+                            x, y, z, q, m, st_q, opp_idx, next_idx
+                        )
+                    else:
+                        metrics = self.calculate_test_summaries_inner_loop(
+                            x, y, z, q, m, st_q, opp_idx, next_idx
+                        )
+                    for acc, val in zip(self.test_metrics, metrics):
+                        acc.accumulate(val)
+                    validation_batches += 1
+                except StopIteration:
+                    print(
+                        f"Validation dataset exhausted after {validation_batches} batches, resetting iterator"
+                    )
+                    self.validation_iter = iter(self.validation_dataset)
+                    break
+                except Exception as e:
+                    print(
+                        f"ERROR in validation batch {batch_idx} at step {steps}: {type(e).__name__}: {e}"
+                    )
+                    raise
+            with self.validation_writer.as_default():
+                for metric in self.test_metrics:
+                    tf.summary.scalar(metric.long_name, metric.get(), step=steps)
+            self.validation_writer.flush()
 
-        print("step {}, validation:".format(steps), end="")
-        for metric in self.test_metrics:
+            print("step {}, validation:".format(steps), end="")
+            for metric in self.test_metrics:
+                print(
+                    " {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix),
+                    end="",
+                )
+            print()
+        except Exception as e:
             print(
-                " {}={:g}{}".format(metric.short_name, metric.get(), metric.suffix),
-                end="",
+                f"ERROR in calculate_test_validations at step {steps}: {type(e).__name__}: {e}"
             )
-        print()
+            import traceback
+
+            traceback.print_exc()
+            raise
 
     @tf.function()
     def compute_update_ratio(self, before_weights, after_weights, steps: int):
@@ -2615,6 +2692,14 @@ class TFProcess:
             flow = tf.transpose(inputs, perm=[0, 2, 3, 1])
             flow = tf.reshape(flow, [-1, 64, tf.shape(inputs)[1]])
 
+            # Add positional encoding (64 channels) to match lc0's INPUT_EMBEDDING_PE_MAP
+            # This creates 112 + 64 = 176 input features per square
+            pos_enc = tf.constant(kPosEncoding, dtype=flow.dtype)  # [64, 64]
+            pos_enc = tf.expand_dims(pos_enc, 0)  # [1, 64, 64]
+            batch_size = tf.shape(flow)[0]
+            pos_enc = tf.tile(pos_enc, [batch_size, 1, 1])  # [batch, 64, 64]
+            flow = tf.concat([flow, pos_enc], axis=-1)  # [batch, 64, 176]
+
             # square embedding
             flow = tf.keras.layers.Dense(
                 self.embedding_size,
@@ -2646,12 +2731,16 @@ class TFProcess:
 
         flow_ = flow
 
-        policy_tokens = tf.keras.layers.Dense(
-            self.pol_embedding_size,
-            kernel_initializer="glorot_normal",
-            activation=self.DEFAULT_ACTIVATION,
-            name=name + "policy/embedding",
-        )(flow_)
+        # Skip policy embedding projection if sizes match (T1 model compatibility)
+        if self.pol_embedding_size != self.embedding_size:
+            policy_tokens = tf.keras.layers.Dense(
+                self.pol_embedding_size,
+                kernel_initializer="glorot_normal",
+                activation=self.DEFAULT_ACTIVATION,
+                name=name + "policy/embedding",
+            )(flow_)
+        else:
+            policy_tokens = flow_
 
         def policy_head(name, activation=None, depth=None, opponent=False):
             if depth is None:

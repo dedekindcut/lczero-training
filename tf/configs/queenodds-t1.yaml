@@ -1,0 +1,135 @@
+name: "T1-QueenOdds-LoRA"
+gpu: 0
+dataset:
+    num_chunks: 500_000_000
+    allow_less_chunks: true
+    train_ratio: 0.95
+    sort_type: name
+    input_train:
+        - "/workspace/data/QueenOddsV2/input_train/"
+    input_test:
+        - "/workspace/data/QueenOddsV2/input_test/"
+    input_validation:
+        - "/workspace/data/QueenOddsV2/input_validation/"
+    train_workers: 8
+    test_workers: 4
+    fast_chunk_loading: true
+training:
+    precision: half
+    pb_source: "/workspace/nets/t1-256x10-distilled-swa-2432500.pb.gz"
+    swa: false
+    swa_output: false
+    swa_max_n: 10
+    swa_steps: 100
+    max_grad_norm: 10.0
+    batch_size: 512
+    num_batch_splits: 2
+    value_focus_min: 1.0
+    value_focus_slope: 0.0
+    lookahead_optimizer: false
+    renorm: true
+    renorm_max_r: 1.0
+    renorm_max_d: 0.0
+    test_steps: 5_000
+    disable_pb_checkpointing: false
+    checkpoint_activations: false
+
+    validation_steps: 5000
+    num_test_positions: 10_240
+    train_avg_report_steps: 1_000
+    total_steps: 120_000
+    checkpoint_steps: 120_000
+    shuffle_size: 500_000
+    warmup_steps: 1000
+    mask_legal_moves: true
+    lr_values:
+        - 0.0002
+        - 0.0001
+    lr_boundaries:
+        - 100_000
+    loss_weights:
+        policy: 1.0
+        policy_optimistic_st: 0.0
+        policy_soft: 0.0
+        policy_opponent: 0.0
+        policy_next: 0.0
+        value_winner: 1.0
+        value_q: 0.0
+        value_q_cat: 0.0
+        value_st: 0.0
+        value_q_err: 0.0
+        value_st_err: 0.0
+        value_st_cat: 0.0
+        moves_left: 1.0
+        reg: 1.0
+    path: "networks"
+
+    optimizer: nadam
+    beta_1: 0.9
+    beta_2: 0.98
+    epsilon: 0.00000001
+    sparse: false
+
+    return_attn_wts: false
+    return_activations: false
+
+model:
+    # Dimension parameters - Matches T1-256x10
+    embedding_size: 256
+    policy_embedding_size: 256
+    value_embedding_size: 32
+    moves_left_embedding_size: 8
+    encoder_layers: 10
+    encoder_heads: 8
+    encoder_d_model: 256
+    encoder_dff: 1024
+    policy_d_model: 256
+    policy_d_aux: 64
+    dropout_rate: 0.0
+
+    embedding_style: "old"
+
+    value: "wdl"
+    moves_left: "v1"
+    input_type: "classic"
+
+    # Smolgen
+    use_smolgen: true
+    smolgen_hidden_channels: 32
+    smolgen_hidden_sz: 256
+    smolgen_gen_sz: 256
+    smolgen_activation: "swish"
+
+    # RPE
+    use_rpe_q: false
+    use_rpe_k: false
+    use_rpe_v: false
+
+    # Gating
+    use_logit_gating: false
+
+    # Ablations
+    omit_qkv_biases: false
+    encoder_rms_norm: false
+
+    # Output heads
+    policy_optimistic_st: false
+    policy_opponent: false
+    policy_next: false
+    value_st: false
+    value_q: false
+    soft_policy: false
+    categorical_value_buckets: 32
+    soft_policy_temperature: 4.0
+
+    # quantization
+    quantize_activations: false
+    quantize_weights: false
+    quantize_activation_bits: 8
+    quantize_weight_bits: 8
+    quantize_channels: false
+    rep_quant: false
+
+    # LoRA
+    lora_rank: 32
+    lora_alpha: 32
