@@ -2252,7 +2252,7 @@ class TFProcess:
         numpy_weights = []
 
         for name, val in weight_dict.items():
-            if "lora_" in name:
+            if "lora" in name:
                 continue
 
             if name.endswith("/kernel:0") and self.lora_rank > 0:
@@ -2738,18 +2738,14 @@ class TFProcess:
 
         flow_ = flow
 
-        # Skip policy embedding projection if sizes match (T1 model compatibility)
-        if self.pol_embedding_size != self.embedding_size:
-            policy_tokens = DenseLayer(
-                self.pol_embedding_size,
-                kernel_initializer="glorot_normal",
-                activation=self.DEFAULT_ACTIVATION,
-                name=name + "policy/embedding",
-                lora_rank=self.lora_rank,
-                lora_alpha=self.lora_alpha,
-            )(flow_)
-        else:
-            policy_tokens = flow_
+        policy_tokens = DenseLayer(
+            self.pol_embedding_size,
+            kernel_initializer="glorot_normal",
+            activation=self.DEFAULT_ACTIVATION,
+            name=name + "policy/embedding",
+            lora_rank=self.lora_rank,
+            lora_alpha=self.lora_alpha,
+        )(flow_)
 
         def policy_head(name, activation=None, depth=None, opponent=False):
             if depth is None:
