@@ -87,7 +87,10 @@ protoc -I=tf --python_out=proto tf/net.proto
 Use the following command to start training. It sets necessary environment variables for legacy Keras compatibility.
 
 ```bash
-TF_USE_LEGACY_KERAS=1 PYTHONPATH=. uv run tf/train.py --cfg tf/configs/example.yaml
+export TF_USE_LEGACY_KERAS=1
+export PYTHONPATH=.
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+python3 tf/train.py --cfg tf/configs/example.yaml
 ```
 
 ## 8. Converting the Model

@@ -1,0 +1,158 @@
+name: "BT4-QueenOdds-LoRA"
+gpu: 0
+dataset:
+    num_chunks: 500_000_000
+    allow_less_chunks: true
+    train_ratio: 0.95
+    sort_type: name
+    input_train:
+        - "/workspace/data/QueenOddsV2/input_train/"
+    input_test:
+        - "/workspace/data/QueenOddsV2/input_test/"
+    input_validation:
+        - "/workspace/data/QueenOddsV2/input_validation/"
+    train_workers: 8
+    test_workers: 4
+    fast_chunk_loading: true
+
+training:
+    precision: half
+    pb_source: "/workspace/nets/BT4-1024x15x32h-swa-6147500.pb.gz"
+    swa: false
+    swa_output: false
+    swa_max_n: 10
+    swa_steps: 100
+    max_grad_norm: 10.0
+
+    batch_size: 128
+    num_batch_splits: 4
+
+    # Focus / sampling
+    value_focus_min: 1.0
+    value_focus_slope: 0.0
+    lookahead_optimizer: false
+
+    # Batch renorm
+    renorm: true
+    renorm_max_r: 1.0
+    renorm_max_d: 0.0
+
+    # Evaluation cadence
+    test_steps: 5_000
+    validation_steps: 5_000
+    num_test_positions: 10_240
+    train_avg_report_steps: 1_000
+
+    # Overall schedule
+    total_steps: 100_000
+    checkpoint_steps: 50_000
+    shuffle_size: 500_000
+    warmup_steps: 1_000
+    mask_legal_moves: true
+
+    # LR schedule similar to T3
+    lr_values:
+        - 0.0002
+        - 0.0001
+    lr_boundaries:
+        - 100_000
+
+    loss_weights:
+        policy: 1.0
+        policy_optimistic_st: 0.0
+        policy_soft: 8.0
+        policy_opponent: 0.00
+        policy_next: 0.00
+        value_winner: 1.0
+        value_q: 1.0
+        value_q_cat: 0.1
+        value_st: 1.0
+        value_q_err: 1.0
+        value_st_err: 1.0
+        value_st_cat: 0.1
+        moves_left: 1.0
+        reg: 1.0
+
+    path: "networks"
+
+    optimizer: nadam
+    beta_1: 0.9
+    beta_2: 0.98
+    epsilon: 0.00000001
+    sparse: false
+
+    return_attn_wts: false
+    return_activations: false
+
+model:
+    # Dimension parameters - Matches BT4-1024x15x32h
+    embedding_size: 1024
+    policy_embedding_size: 1024
+    # From ip_val_b: effectively 0 in this net, we use a reasonable small head
+    value_embedding_size: 128
+    moves_left_embedding_size: 32
+
+    encoder_layers: 15
+    encoder_heads: 32
+    encoder_d_model: 1024
+    # From encoder[0].ffn.dense1_w params: 1,572,864 = 1024 * 1536
+    encoder_dff: 1536
+
+    policy_d_model: 1024
+    policy_d_aux: 256
+
+    dropout_rate: 0.0
+
+    # Embedding: same style as T3, but BT4-sized
+    embedding_style: "new"
+    # From ip_emb_preproc_w: 25,165,824 = 768 * (64 * 512)
+    embedding_dense_sz: 512
+
+    value: "wdl"
+    moves_left: "v1"
+    input_type: "classic"
+
+    # Smolgen - inferred from BT4 protobuf:
+    # compress:   32,768 params = 1024 * 32  -> hidden_channels=32
+    # dense1_b:      256 params             -> hidden_sz=256
+    # dense2_b:    8,192 params             -> heads * gen_sz = 32 * 256
+    use_smolgen: true
+    smolgen_hidden_channels: 32
+    smolgen_hidden_sz: 256
+    smolgen_gen_sz: 256
+    smolgen_activation: "swish"
+
+    # RPE - BT5 uses RPE; for BT4 QueenOdds we default to off to match T3-style config
+    use_rpe_q: false
+    use_rpe_k: false
+    use_rpe_v: false
+
+    # Gating
+    use_logit_gating: false
+
+    # Ablations
+    omit_qkv_biases: false
+    encoder_rms_norm: false
+
+    # Output heads
+    # The BT4 base protobuf has empty ip_val_* etc; follow T3 QueenOdds LoRA style:
+    policy_optimistic_st: false
+    policy_opponent: false
+    policy_next: false
+    value_st: false
+    value_q: false
+    soft_policy: false
+    categorical_value_buckets: 32
+    soft_policy_temperature: 4.0
+
+    # Quantization (off by default)
+    quantize_activations: false
+    quantize_weights: false
+    quantize_activation_bits: 8
+    quantize_weight_bits: 8
+    quantize_channels: false
+    rep_quant: false
+
+    # LoRA
+    lora_rank: 32
+    lora_alpha: 32
