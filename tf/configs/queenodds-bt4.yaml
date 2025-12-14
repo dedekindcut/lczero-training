@@ -44,8 +44,8 @@ training:
     train_avg_report_steps: 1_000
 
     # Overall schedule
-    total_steps: 100_000
-    checkpoint_steps: 50_000
+    total_steps: 200_000
+    checkpoint_steps: 200_000
     shuffle_size: 500_000
     warmup_steps: 1_000
     mask_legal_moves: true

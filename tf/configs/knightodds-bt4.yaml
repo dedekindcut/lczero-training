@@ -1,4 +1,4 @@
-name: "BT4-RookOdds-LoRA"
+name: "BT4-KnightOdds-LoRA"
 gpu: 0
 dataset:
     num_chunks: 500_000_000
@@ -6,11 +6,11 @@ dataset:
     train_ratio: 0.95
     sort_type: name
     input_train:
-        - "/workspace/data/RookOddsV8/input_train/"
+        - "/workspace/data/KnightOddsV4/input_train/"
     input_test:
-        - "/workspace/data/RookOddsV8/input_test/"
+        - "/workspace/data/KnightOddsV4/input_test/"
     input_validation:
-        - "/workspace/data/RookOddsV8/input_validation/"
+        - "/workspace/data/KnightOddsV4/input_validation/"
     train_workers: 8
     test_workers: 4
     fast_chunk_loading: true

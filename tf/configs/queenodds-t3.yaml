@@ -22,8 +22,8 @@ training:
     swa_max_n: 10
     swa_steps: 100
     max_grad_norm: 10.0
-    batch_size: 128
-    num_batch_splits: 4
+    batch_size: 256
+    num_batch_splits: 2
     value_focus_min: 1.0
     value_focus_slope: 0.0
     lookahead_optimizer: false
@@ -37,8 +37,8 @@ training:
     validation_steps: 5000
     num_test_positions: 10_240
     train_avg_report_steps: 1_000
-    total_steps: 100_000
-    checkpoint_steps: 50_000
+    total_steps: 200_000
+    checkpoint_steps: 200_000
     shuffle_size: 500_000
     warmup_steps: 1000
     mask_legal_moves: true
@@ -77,18 +77,18 @@ model:
     # Dimension parameters - Matches T3-512x15x16h
     embedding_size: 512
     policy_embedding_size: 512
-    value_embedding_size: 64
-    moves_left_embedding_size: 16
+    value_embedding_size: 128
+    moves_left_embedding_size: 32
     encoder_layers: 15
     encoder_heads: 16
     encoder_d_model: 512
-    encoder_dff: 2048
+    encoder_dff: 1024
     policy_d_model: 512
     policy_d_aux: 128
     dropout_rate: 0.0
 
     embedding_style: "new"
-    embedding_dense_sz: 256
+    embedding_dense_sz: 512
 
     value: "wdl"
     moves_left: "v1"
@@ -96,9 +96,9 @@ model:
 
     # Smolgen
     use_smolgen: true
-    smolgen_hidden_channels: 64
-    smolgen_hidden_sz: 512
-    smolgen_gen_sz: 512
+    smolgen_hidden_channels: 32
+    smolgen_hidden_sz: 256
+    smolgen_gen_sz: 256
     smolgen_activation: "swish"
 
     # RPE
@@ -114,12 +114,12 @@ model:
     encoder_rms_norm: false
 
     # Output heads
-    policy_optimistic_st: true
+    policy_optimistic_st: false
     policy_opponent: false
     policy_next: false
-    value_st: true
-    value_q: true
-    soft_policy: true
+    value_st: false
+    value_q: false
+    soft_policy: false
     categorical_value_buckets: 32
     soft_policy_temperature: 4.0
 
