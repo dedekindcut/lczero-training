@@ -28,7 +28,7 @@ Install `uv` for fast dependency management:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.cargo/env
+source $HOME/.local/bin/env
 ```
 
 ## 3. Project Setup
@@ -87,6 +87,7 @@ protoc -I=tf --python_out=proto tf/net.proto
 Use the following command to start training. It sets necessary environment variables for legacy Keras compatibility.
 
 ```bash
+source .venv/bin/activate
 export TF_USE_LEGACY_KERAS=1
 export PYTHONPATH=.
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
@@ -98,7 +99,7 @@ python3 tf/train.py --cfg tf/configs/example.yaml
 Use the following command to convert the checkpoint to `.pb.gz`.
 
 ```bash
-cd /workspace/lczero-training && TF_USE_LEGACY_KERAS=1 PYTHONPATH=. uv run python3 tf/make_model.py --cfg tf/configs/queenodds.yaml --start 100000
+python3 tf/model_to_net.py --cfg tf/configs/example.yaml
 ```
 
 

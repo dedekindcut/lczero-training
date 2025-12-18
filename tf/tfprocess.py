@@ -26,12 +26,11 @@ from functools import reduce
 
 import attention_policy_map as apm
 import numpy as np
+import proto.net_pb2 as pb
 import tensorflow as tf
 from keras import backend as K
 from net import Net
 from pos_encoding import kPosEncoding
-
-import proto.net_pb2 as pb
 
 # @tf.custom_gradient
 # def gradient_checkpointed_matmul(x, kernel, bias):
@@ -225,7 +224,7 @@ class DenseLayer(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         self.in_units = input_shape[-1]
-        trainable_main = self.lora_rank == 0
+        trainable_main = (self.lora_rank == 0) and self.trainable
         self.kernel = self.add_weight(
             name="kernel",
             shape=[self.in_units, self.units],
@@ -245,13 +244,13 @@ class DenseLayer(tf.keras.layers.Layer):
                 name="lora_A",
                 shape=[self.in_units, self.lora_rank],
                 initializer="glorot_normal",
-                trainable=True,
+                trainable=self.trainable,
             )
             self.lora_B = self.add_weight(
                 name="lora_B",
                 shape=[self.lora_rank, self.units],
                 initializer="zeros",
-                trainable=True,
+                trainable=self.trainable,
             )
 
         if self.quantized:
@@ -2391,8 +2390,9 @@ class TFProcess:
             n_bits=self.quantize_weight_bits,
             input_quantize=input_quantize,
             use_rep_quant=use_rep_quant,
-            lora_rank=self.lora_rank,
+            lora_rank=0,
             lora_alpha=self.lora_alpha,
+            trainable=False,
         )(inputs)
         v = DenseLayer(
             depth,
@@ -2457,8 +2457,9 @@ class TFProcess:
             n_bits=self.quantize_weight_bits,
             input_quantize=out_quantize,
             use_rep_quant=False,
-            lora_rank=self.lora_rank,
+            lora_rank=0,
             lora_alpha=self.lora_alpha,
+            trainable=False,
         )(scaled_attention)
         activations[name + "/dense"] = output
         return output, attention_weights, activations
@@ -2498,8 +2499,9 @@ class TFProcess:
             n_bits=self.quantize_weight_bits,
             input_quantize=input_quantize,
             use_rep_quant=use_rep_quant,
-            lora_rank=self.lora_rank,
+            lora_rank=0,
             lora_alpha=self.lora_alpha,
+            trainable=False,
         )(inputs)
 
         activations[name + "/dense1"] = dense1
@@ -2514,8 +2516,9 @@ class TFProcess:
                 n_bits=self.quantize_weight_bits,
                 input_quantize=input_quantize,
                 use_rep_quant=use_rep_quant,
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(inputs)
 
             dense1 = dense1 * dense3
@@ -2541,8 +2544,9 @@ class TFProcess:
             n_bits=self.quantize_weight_bits,
             input_quantize=out_quantize,
             use_rep_quant=False,
-            lora_rank=self.lora_rank,
+            lora_rank=0,
             lora_alpha=self.lora_alpha,
+            trainable=False,
         )(dense1)
         activations[name + "/dense2"] = out
 
@@ -2650,8 +2654,9 @@ class TFProcess:
             pos_info_processed = DenseLayer(
                 64 * self.embedding_dense_sz,
                 name=name + "embedding/preprocess",
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(pos_info_flat)
             pos_info = tf.reshape(pos_info_processed, [-1, 64, self.embedding_dense_sz])
             flow = tf.keras.layers.Concatenate()([flow, pos_info])
@@ -2662,8 +2667,9 @@ class TFProcess:
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "embedding",
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(flow)
             flow = self.encoder_norm(name=name + "embedding/ln")(flow)
             flow = ma_gating(flow, name=name + "embedding")
@@ -2711,8 +2717,9 @@ class TFProcess:
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name="embedding",
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(flow)
 
             flow = ma_gating(flow, name="embedding")
@@ -2743,8 +2750,9 @@ class TFProcess:
             kernel_initializer="glorot_normal",
             activation=self.DEFAULT_ACTIVATION,
             name=name + "policy/embedding",
-            lora_rank=self.lora_rank,
+            lora_rank=0,
             lora_alpha=self.lora_alpha,
+            trainable=False,
         )(flow_)
 
         def policy_head(name, activation=None, depth=None, opponent=False):
@@ -2766,8 +2774,9 @@ class TFProcess:
                 depth,
                 kernel_initializer="glorot_normal",
                 name=name + "/attention/wk",
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(tokens)
 
             # POLICY SELF-ATTENTION: self-attention weights are interpreted as from->to policy
@@ -2788,8 +2797,9 @@ class TFProcess:
                 kernel_initializer="glorot_normal",
                 name=name + "/attention/ppo",
                 use_bias=False,
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(promotion_keys)
             promotion_offsets = (
                 tf.transpose(promotion_offsets, perm=[0, 2, 1]) * dk
@@ -2847,8 +2857,9 @@ class TFProcess:
             return DenseLayer(
                 2,
                 name=name + "/attention/wq",
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(policy_tokens)
 
         aux_depth = self.cfg["model"].get("policy_d_aux", self.policy_d_model)
@@ -2883,8 +2894,9 @@ class TFProcess:
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "/embedding",
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(flow)
 
             h_val_flat = tf.keras.layers.Flatten()(embedded_val)
@@ -2893,8 +2905,9 @@ class TFProcess:
                 kernel_initializer="glorot_normal",
                 activation=self.DEFAULT_ACTIVATION,
                 name=name + "/dense1",
-                lora_rank=self.lora_rank,
+                lora_rank=0,
                 lora_alpha=self.lora_alpha,
+                trainable=False,
             )(h_val_flat)
 
             # WDL head
@@ -2903,8 +2916,9 @@ class TFProcess:
                     3,
                     kernel_initializer="glorot_normal",
                     name=name + "/dense2",
-                    lora_rank=self.lora_rank,
+                    lora_rank=0,
                     lora_alpha=self.lora_alpha,
+                    trainable=False,
                 )(h_fc2)
             else:
                 value = DenseLayer(
@@ -2912,8 +2926,9 @@ class TFProcess:
                     kernel_initializer="glorot_normal",
                     activation="tanh",
                     name=name + "/dense2",
-                    lora_rank=self.lora_rank,
+                    lora_rank=0,
                     lora_alpha=self.lora_alpha,
+                    trainable=False,
                 )(h_fc2)
 
             if use_err:
@@ -2923,8 +2938,9 @@ class TFProcess:
                     kernel_initializer="glorot_normal",
                     name=name + "/dense_error",
                     activation="sigmoid",
-                    lora_rank=self.lora_rank,
+                    lora_rank=0,
                     lora_alpha=self.lora_alpha,
+                    trainable=False,
                 )(h_fc2)
             else:
                 value_err = None
@@ -2934,8 +2950,9 @@ class TFProcess:
                     self.categorical_value_buckets,
                     kernel_initializer="glorot_normal",
                     name=name + "/dense_cat",
-                    lora_rank=self.lora_rank,
+                    lora_rank=0,
                     lora_alpha=self.lora_alpha,
+                    trainable=False,
                 )(h_fc2)
             else:
                 value_cat = None
